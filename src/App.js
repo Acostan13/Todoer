@@ -1,13 +1,14 @@
-import React, { Component } from 'react';
-import './App.css';
+import React, { Component } from "react";
+import "./App.css";
 
-import Amplify, { API, graphqlOperation  } from 'aws-amplify';
-import { withAuthenticator, AmplifySignOut } from '@aws-amplify/ui-react';
+import Amplify, { Auth, API, graphqlOperation } from "aws-amplify";
+import { withAuthenticator, AmplifySignOut } from "@aws-amplify/ui-react";
 
-import * as queries from './graphql/queries';
-import * as mutations from './graphql/mutations';
+import * as queries from "./graphql/queries";
+import * as mutations from "./graphql/mutations";
+import * as subscriptions from "./graphql/subscriptions";
 
-import aws_exports from './(src)/aws-exports';
+import aws_exports from "./(src)/aws-exports";
 
 Amplify.configure(aws_exports);
 
@@ -17,8 +18,8 @@ class App extends Component {
     this.myRef = React.createRef();
 
     this.state = {
-      items: [ ]
-    }
+      items: [],
+    };
   }
 
   // logout = () => {
@@ -29,21 +30,39 @@ class App extends Component {
   getTodos = async () => {
     const result = await API.graphql(graphqlOperation(queries.listTodos));
 
-    this.setState({items: result.data.listTodos.items});
-  }
+    this.setState({ items: result.data.listTodos.items });
+  };
 
   addTodo = async () => {
     const node = this.myRef.current;
-    const createTodoInput = { input: {name: node.value, status: "NEW"} };
+    const createTodoInput = { input: { name: node.value, status: "NEW" } };
 
     await API.graphql(graphqlOperation(mutations.createTodo, createTodoInput));
 
-    node.value = '';
-    window.location.reload();
-  }
+    node.value = "";
+  };
 
   componentDidMount() {
     this.getTodos();
+
+    API.graphql(graphqlOperation(subscriptions.onCreateTodo, {owner: Auth.user.username})).subscribe({
+      next: (result) => {
+        const items = this.state.items;
+
+        items.push(result.value.data.onCreateTodo);
+        this.setState({ items: items });
+      },
+    });
+
+    API.graphql(graphqlOperation(subscriptions.onUpdateTodo, {owner: Auth.user.username})).subscribe({
+      next: (result) => {
+        const items = this.state.items;
+        const todo = result.value.data.onUpdateTodo;
+        const idx = items.findIndex((itm) => itm.id === todo.id);
+        items[idx] = todo;
+        this.setState({ items: items });
+      },
+    });
   }
 
   render() {
@@ -67,30 +86,40 @@ class TodoList extends Component {
     return (
       <div className="TodoList">
         <ul>
-          {
-            this.props.items.map( (itm, i) => {
-              return <TodoItem item={itm} key={i} />
-            })
-          }
+          {this.props.items.map((itm, i) => {
+            return <TodoItem item={itm} key={i} />;
+          })}
         </ul>
       </div>
-    )
+    );
   }
 }
 
 class TodoItem extends Component {
+  updateTodoStatus = async (event) => {
+    const item = this.props.item;
+    const todoStatus = event.target.checked ? "DONE" : "NOT DONE";
+
+    const updateTodoInput = {
+      input: { id: item.id, name: item.name, status: todoStatus },
+    };
+    await API.graphql(graphqlOperation(mutations.updateTodo, updateTodoInput));
+  };
 
   render() {
     const item = this.props.item;
 
     return (
       <li>
-        <input type="checkbox"/>
+        <input
+          type="checkbox"
+          checked={item.status === "DONE"}
+          onChange={this.updateTodoStatus}
+        />
         {item.name}
       </li>
-    )
+    );
   }
 }
 
 export default withAuthenticator(App);
-
